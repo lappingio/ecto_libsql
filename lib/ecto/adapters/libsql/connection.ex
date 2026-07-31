@@ -1248,12 +1248,24 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   # Boolean logic
   defp expr({:and, _, [left, right]}, sources, query) do
-    [?(, expr(left, sources, query), " AND ", expr(right, sources, query), ?)]
+    [?(, bool_operand(left, sources, query), " AND ", bool_operand(right, sources, query), ?)]
   end
 
   defp expr({:or, _, [left, right]}, sources, query) do
-    [?(, expr(left, sources, query), " OR ", expr(right, sources, query), ?)]
+    [?(, bool_operand(left, sources, query), " OR ", bool_operand(right, sources, query), ?)]
   end
+
+  # A fragment is arbitrary SQL and may be a bare subquery (`SELECT ...`) or
+  # otherwise loosely bound, so it has to be parenthesised before being joined
+  # with AND/OR -- without this, `fragment("SELECT ...")` renders as
+  # `x AND SELECT ...`, which is a syntax error. Non-fragment operands are
+  # already self-delimiting and are left alone to keep the SQL readable.
+  # ecto_sqlite3 gets this via op_to_binary/3 -> paren_expr/3.
+  defp bool_operand({:fragment, _, _} = expr, sources, query) do
+    paren_expr(expr, sources, query)
+  end
+
+  defp bool_operand(expr, sources, query), do: expr(expr, sources, query)
 
   # IN clause
   defp expr({:in, _, [left, right]}, sources, query) when is_list(right) do
