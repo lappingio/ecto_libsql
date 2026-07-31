@@ -359,6 +359,10 @@ defmodule Ecto.Adapters.LibSql do
     {:ok, Time.to_iso8601(time)}
   end
 
+  defp decimal_encode(nil) do
+    {:ok, nil}
+  end
+
   defp decimal_encode(%Decimal{} = decimal) do
     {:ok, Decimal.to_string(decimal)}
   end
