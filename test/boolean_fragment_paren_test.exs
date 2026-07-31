@@ -25,7 +25,16 @@ defmodule EctoLibSql.BooleanFragmentParenTest do
     end
   end
 
-  defp to_sql(query), do: TestRepo |> Ecto.Adapters.SQL.to_sql(:all, query) |> elem(0)
+  @test_db "/tmp/ecto_libsql_paren_test.db"
+
+  setup_all do
+    File.rm(@test_db)
+    {:ok, _} = TestRepo.start_link(database: @test_db)
+    on_exit(fn -> File.rm(@test_db) end)
+    :ok
+  end
+
+  defp to_sql(query), do: :all |> Ecto.Adapters.SQL.to_sql(TestRepo, query) |> elem(0)
 
   defp subselect(field_expr) do
     dynamic(
@@ -57,7 +66,8 @@ defmodule EctoLibSql.BooleanFragmentParenTest do
   end
 
   test "a fragment AND-ed with an ordinary comparison is still parenthesised" do
-    query = from(j in Job) |> where(^dynamic(^subselect("a") and [j], j.state == ^"available"))
+    comparison = dynamic([j], j.state == ^"available")
+    query = from(j in Job) |> where(^dynamic(^subselect("a") and ^comparison))
 
     sql = to_sql(query)
 
@@ -67,7 +77,6 @@ defmodule EctoLibSql.BooleanFragmentParenTest do
   test "non-fragment operands are left unparenthesised, keeping SQL readable" do
     query = from(j in Job, where: j.state == ^"available" and j.id > ^1)
 
-    assert to_sql(query) =~ ~s{("jobs"."state" = ?1 AND "jobs"."id" > ?2)} or
-             to_sql(query) =~ ~s{(j0."state" = ?1 AND j0."id" > ?2)}
+    assert to_sql(query) =~ ~s{(s0."state" = ?1 AND s0."id" > ?2)}
   end
 end
