@@ -306,11 +306,24 @@ defmodule EctoLibSql do
   @doc """
   Begins a new database transaction.
 
-  The transaction behaviour (deferred/immediate/exclusive) can be controlled
-  via options passed to the Native module.
+  The behaviour defaults to `:deferred`, SQLite's own default, and can be
+  changed globally with:
+
+      config :ecto_libsql, transaction_behavior: :immediate
+
+  `:immediate` matters for pooled writers. A deferred transaction takes the
+  write lock only on its first write, and SQLite will not let the busy handler
+  wait for that upgrade — if another connection holds the write lock, the
+  upgrade returns `SQLITE_BUSY` immediately, because waiting could deadlock.
+  So `busy_timeout` cannot protect a deferred transaction that reads and then
+  writes: it fails at once, however long the timeout. Beginning IMMEDIATE
+  takes the lock up front, where the busy handler *does* apply and waiters
+  queue instead of failing.
   """
   def handle_begin(_opts, state) do
-    case EctoLibSql.Native.begin(state) do
+    behavior = Application.get_env(:ecto_libsql, :transaction_behavior, :deferred)
+
+    case EctoLibSql.Native.begin(state, behavior: behavior) do
       {:ok, new_state} -> {:ok, :begin, new_state}
       {:error, reason} -> {:error, reason, state}
     end
