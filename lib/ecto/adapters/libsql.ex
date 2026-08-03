@@ -311,8 +311,8 @@ defmodule Ecto.Adapters.LibSql do
   defp json_array_decode(_value), do: :error
 
   @doc false
-  def dumpers(:binary, type), do: [type]
-  def dumpers(:binary_id, type), do: [type]
+  def dumpers(:binary, type), do: [type, &blob_encode/1]
+  def dumpers(:binary_id, type), do: [type, &blob_encode/1]
   def dumpers(:boolean, type), do: [type, &bool_encode/1]
   def dumpers(:utc_datetime, type), do: [type, &datetime_encode/1]
   def dumpers(:utc_datetime_usec, type), do: [type, &datetime_encode/1]
@@ -330,6 +330,32 @@ defmodule Ecto.Adapters.LibSql do
   defp bool_encode(nil), do: {:ok, nil}
   defp bool_encode(false), do: {:ok, 0}
   defp bool_encode(true), do: {:ok, 1}
+
+  # Tag binaries so the driver stores them as BLOB rather than having to guess
+  # from the bytes.
+  #
+  # Without this, a binary id reaches the NIF as a bare Elixir binary, and the
+  # argument conversion there tries `decode::<String>()` before `decode::<Binary>()`.
+  # A UUID whose 16 bytes happen to be valid UTF-8 therefore lands as TEXT
+  # instead of BLOB. Measured: ~63 of every 1,000,000 random v4 UUIDs are valid
+  # UTF-8 (~1 in 16,000), and one such row exists in a production database.
+  #
+  # Two consequences, the quiet one first. A row filed as TEXT is not found by
+  # a blob-typed lookup at all — it round-trips only because the same driver
+  # repeats the mistake consistently, so another client querying the same file
+  # cannot see it. And if those bytes also contain a NUL (~2 per 1,000,000
+  # UUIDs), reading the value back truncates it at the NUL, which surfaces as
+  # `cannot load <<...>> as type Ash.Type.UUID` with 0, 4 or 15 of the expected
+  # 16 bytes depending on where the NUL fell.
+  #
+  # The driver cannot fix this itself: in Elixir a string IS a binary, so
+  # checking Binary before String there would store every text column as a
+  # BLOB. The type is known here and guessed there, so it is tagged here — the
+  # `{:blob, _}` convention the NIF already understands. Same approach as
+  # ecto_sqlite3's `Codec.blob_encode/1`.
+  defp blob_encode(nil), do: {:ok, nil}
+  defp blob_encode(value) when is_binary(value), do: {:ok, {:blob, value}}
+  defp blob_encode(value), do: {:ok, value}
 
   defp datetime_encode(nil) do
     {:ok, nil}

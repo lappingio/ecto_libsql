@@ -520,8 +520,19 @@ pub fn decode_term_to_value(term: Term) -> Result<Value, String> {
         Ok(Value::Integer(if v { 1 } else { 0 }))
     } else if let Ok(v) = term.decode::<String>() {
         Ok(Value::Text(v))
+    } else if let Ok((atom, data)) = term.decode::<(rustler::Atom, Binary)>() {
+        // {:blob, <<...>>} from the Ecto binary dumper. This arm has to come
+        // before the (Atom, Vec<u8>) one: in rustler a Vec<u8> decodes from an
+        // Elixir LIST, not a binary, so the list arm alone silently rejected
+        // every real tagged binary with "Unsupported argument type" — which is
+        // why nothing used the convention and binary ids arrived bare instead.
+        if atom == blob() {
+            Ok(Value::Blob(data.as_slice().to_vec()))
+        } else {
+            Err(format!("Unsupported atom tuple: {atom:?}"))
+        }
     } else if let Ok((atom, data)) = term.decode::<(rustler::Atom, Vec<u8>)>() {
-        // Handle {:blob, data} tuple from Ecto binary dumper
+        // {:blob, [byte, ...]} — a tagged list of bytes
         if atom == blob() {
             Ok(Value::Blob(data))
         } else {
