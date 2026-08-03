@@ -306,10 +306,19 @@ defmodule EctoLibSql do
   @doc """
   Begins a new database transaction.
 
-  The behaviour defaults to `:deferred`, SQLite's own default, and can be
-  changed globally with:
+  The behaviour defaults to `:deferred`, SQLite's own default. It can be set
+  globally:
 
       config :ecto_libsql, transaction_behavior: :immediate
+
+  or per transaction, which takes precedence:
+
+      Repo.transaction(fun, transaction_behavior: :immediate)
+
+  Per-transaction is usually what you want in an application that is mostly
+  reads: it leaves ordinary transactions deferred and lets the few that read
+  before they write — a backfill, a migration, a reconciliation job — take the
+  write lock up front without imposing that cost on everything else.
 
   `:immediate` matters for pooled writers. A deferred transaction takes the
   write lock only on its first write, and SQLite will not let the busy handler
@@ -320,8 +329,10 @@ defmodule EctoLibSql do
   takes the lock up front, where the busy handler *does* apply and waiters
   queue instead of failing.
   """
-  def handle_begin(_opts, state) do
-    behavior = Application.get_env(:ecto_libsql, :transaction_behavior, :deferred)
+  def handle_begin(opts, state) do
+    behavior =
+      Keyword.get(opts, :transaction_behavior) ||
+        Application.get_env(:ecto_libsql, :transaction_behavior, :deferred)
 
     case EctoLibSql.Native.begin(state, behavior: behavior) do
       {:ok, new_state} -> {:ok, :begin, new_state}
